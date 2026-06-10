@@ -1,0 +1,9 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#2b1f3c"/><stop offset="100%" stop-color="#152234"/></linearGradient></defs>
+  <rect width="1200" height="700" fill="url(#g)"/>
+  <rect x="260" y="130" width="680" height="440" rx="40" fill="#10182a" stroke="#a855f7" stroke-width="6"/>
+  <path d="M360 420h480" stroke="#a855f7" stroke-width="12" stroke-linecap="round"/>
+  <path d="M360 350h300" stroke="#ef9f27" stroke-width="12" stroke-linecap="round"/>
+  <path d="M360 280h220" stroke="#378add" stroke-width="12" stroke-linecap="round"/>
+  <text x="80" y="620" fill="#ffffff" font-size="72" font-family="Arial">Project 4</text>
+</svg>

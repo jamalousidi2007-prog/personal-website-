@@ -1,0 +1,145 @@
+﻿:root {
+  --bg-main: #0f172a;
+  --bg-card: #1a0a0a;
+  --text-primary: #ffffff;
+  --text-secondary: #a0b4c8;
+  --text-tertiary: #7aa3cc;
+  --brand: #e24b4a;
+  --border-soft: #ffffff22;
+  --radius-lg: 18px;
+  --radius-md: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: radial-gradient(circle at 20% 0%, #1a2236 0%, #0f172a 45%, #0b1222 100%);
+  color: var(--text-primary);
+  font-family: Cairo, Tahoma, Arial, sans-serif;
+  min-height: 100%;
+  scroll-behavior: smooth;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+input,
+button {
+  font-family: inherit;
+}
+
+.page-shell {
+  min-height: 100vh;
+  padding: 2rem 1rem;
+  animation: pageFadeIn 0.45s ease both;
+}
+
+.container {
+  width: 100%;
+  max-width: 1150px;
+  margin: 0 auto;
+}
+
+.avatar-chip {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 3px solid var(--brand);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #be3b3a 0%, #e24b4a 45%, #d76d2d 100%);
+}
+
+.small-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--brand);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #be3b3a 0%, #e24b4a 45%, #d76d2d 100%);
+}
+
+.lang-toggle {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 999;
+  border: 0.5px solid #ffffff26;
+  border-radius: 999px;
+  background: #0f172ad0;
+  backdrop-filter: blur(6px);
+  padding: 4px;
+  display: flex;
+  gap: 4px;
+}
+
+html[dir="rtl"] .lang-toggle {
+  left: auto;
+  right: 12px;
+}
+
+.lang-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.lang-toggle button.active {
+  background: var(--brand);
+  color: #fff;
+}
+
+.lang-toggle button:hover {
+  transform: translateY(-1px);
+}
+
+a,
+button,
+input,
+select {
+  transition: all 0.2s ease;
+}
+
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .page-shell {
+    padding: 1rem 0.75rem;
+  }
+}
