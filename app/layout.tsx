@@ -3,7 +3,7 @@ import Providers from "@/components/Providers";
 import LicenseGuard from "@/components/LicenseGuard";
 import "./globals.css";
 
-const SITE_URL = "https://jamalousidi.vercel.app";
+const SITE_URL = "https://personal-website-nine-iota-62.vercel.app";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -64,6 +64,9 @@ export const metadata: Metadata = {
   },
   alternates: {
     canonical: SITE_URL,
+  },
+  verification: {
+    google: "XA9xqEcWB1U-xj_CevEiCmMRjb8fsoLMsJeWvq5Eab4",
   },
   manifest: "/manifest.json",
   appleWebApp: {
