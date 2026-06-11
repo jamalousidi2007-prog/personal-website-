@@ -112,67 +112,82 @@ async function forceBlockedExit(isDeleted?: boolean) {
 }
 
 async function ensureAccessAndProfile(uid: string, emailRaw: string): Promise<AccessMeta> {
-  console.log("[Auth] ensureAccessAndProfile: start for", emailRaw, "uid:", uid);
   const db = getFirebaseDb();
-  if (!db) {
-    console.log("[Auth] ensureAccessAndProfile: no Firestore DB, returning default role");
-    return { role: getDefaultRole(emailRaw), banned: false };
-  }
+  if (!db) return { role: getDefaultRole(emailRaw), banned: false };
 
   const email = normalizeEmail(emailRaw);
   const key = emailToKey(email);
   const accessRef = doc(db, "access_list", key);
   const usersRef = doc(db, "users", uid);
 
-  // Read with 10s timeout to prevent hanging
-  const timeout = (ms: number) => new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Firestore timeout")), ms));
-  console.log("[Auth] ensureAccessAndProfile: reading Firestore docs...");
-  const [accessSnap, userSnap] = await Promise.race([
-    Promise.all([getDoc(accessRef), getDoc(usersRef)]),
-    timeout(10000),
-  ]);
-  console.log("[Auth] ensureAccessAndProfile: Firestore read done. access exists:", accessSnap.exists(), "user exists:", userSnap.exists());
+  // Add timeout to prevent hanging
+  const timeout = (ms: number) => new Promise<never>((_, reject) => 
+    setTimeout(() => reject(new Error("Firestore timeout")), ms)
+  );
 
-  const accessRole = accessSnap.exists()
-    ? (accessSnap.data().role as UserRole | undefined)
-    : undefined;
-  const accessBanned = accessSnap.exists() ? Boolean(accessSnap.data().banned) : false;
-  const accessDeleted = accessSnap.exists() ? Boolean(accessSnap.data().deleted) : false;
+  // Read access_list and user docs (non-fatal if fails)
+  let accessSnap: any = null;
+  let userSnap: any = null;
+  let accessRole: UserRole | undefined = undefined;
+  let accessBanned = false;
+  let accessDeleted = false;
+
+  try {
+    [accessSnap, userSnap] = await Promise.race([
+      Promise.all([getDoc(accessRef), getDoc(usersRef)]),
+      timeout(10000),
+    ]);
+    
+    if (accessSnap?.exists()) {
+      accessRole = accessSnap.data().role as UserRole | undefined;
+      accessBanned = Boolean(accessSnap.data().banned);
+      accessDeleted = Boolean(accessSnap.data().deleted);
+    }
+  } catch (readErr) {
+    console.warn("[Auth] Failed to read user/access docs (non-fatal):", readErr);
+    // Non-fatal: assume default role and not banned
+  }
+
   const role = resolveRole(email, accessRole);
 
-  // Write in parallel with 10s timeout
-  await Promise.race([
-    Promise.all([
-      setDoc(
-        usersRef,
-        {
-          uid,
-          email,
-          role,
-          banned: accessBanned,
-          status: "online",
-          lastSeenText: "Online",
-          updatedAt: serverTimestamp(),
-          createdAt: userSnap.exists() ? userSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
-        },
-        { merge: true }
-      ),
-      setDoc(
-        accessRef,
-        {
-          email,
-          role,
-          banned: accessBanned,
-          status: "online",
-          lastSeenText: "Online",
-          updatedAt: serverTimestamp(),
-          createdAt: accessSnap.exists() ? accessSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
-        },
-        { merge: true }
-      ),
-    ]),
-    timeout(10000),
-  ]);
+  // Write user and access docs (non-fatal if fails)
+  try {
+    await Promise.race([
+      Promise.all([
+        setDoc(
+          usersRef,
+          {
+            uid,
+            email,
+            role,
+            banned: accessBanned,
+            status: "online",
+            lastSeenText: "Online",
+            updatedAt: serverTimestamp(),
+            createdAt: userSnap?.exists() ? userSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
+          },
+          { merge: true }
+        ),
+        setDoc(
+          accessRef,
+          {
+            email,
+            role,
+            banned: accessBanned,
+            status: "online",
+            lastSeenText: "Online",
+            updatedAt: serverTimestamp(),
+            createdAt: accessSnap?.exists() ? accessSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
+          },
+          { merge: true }
+        ),
+      ]),
+      timeout(10000),
+    ]);
+  } catch (writeErr) {
+    console.warn("[Auth] Failed to write user/access docs (non-fatal):", writeErr);
+    // Non-fatal: continue even if writes fail
+  }
 
   return { role, banned: accessBanned || accessDeleted, deleted: accessDeleted };
 }
@@ -219,6 +234,7 @@ function setSessionCookie() {
   const token = generateSessionToken();
   const secureFlag = window.location.protocol === "https:" ? "; Secure" : "";
   document.cookie = `site_session=${token}; Path=/; SameSite=Lax${secureFlag}; Max-Age=2592000`;
+  console.log("[Auth] Session cookie set, path=/");
 }
 
 function clearSession() {
@@ -295,8 +311,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getRedirectResult(auth).catch(() => {});
 
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log("[Auth] onAuthStateChanged:", firebaseUser?.email ?? "no user");
-
       if (isLogoutPending()) {
         if (firebaseUser) await signOut(auth);
         clearSession();
@@ -345,7 +359,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // User is authenticated — set everything
-      console.log("[Auth] User authenticated, setting user:", firebaseUser.email);
+      console.log("[Auth] User authenticated:", firebaseUser.email);
       localStorage.removeItem(EMAIL_SESSION_STORAGE_KEY);
       window.sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
       setUser(firebaseUser);
@@ -353,7 +367,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRoleLoading(true);
 
       try {
-        console.log("[Auth] Calling ensureAccessAndProfile for:", firebaseUser.email);
+        console.log("[Auth] Calling ensureAccessAndProfile...");
         const meta = await ensureAccessAndProfile(firebaseUser.uid, firebaseUser.email ?? "");
         console.log("[Auth] ensureAccessAndProfile result:", meta);
         if (meta.banned) {
@@ -367,15 +381,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setRole(null);
           clearSession();
         } else {
+          console.log("[Auth] Setting role:", meta.role);
           setRole(meta.role);
           await notifySuperAdminLogin(firebaseUser.email ?? "");
         }
       } catch (e) {
         console.error("[Auth] ensureAccessAndProfile failed", e);
-        // Even if Firestore writes fail, allow the user to proceed with default role
         setRole(resolveRole(firebaseUser.email ?? ""));
       } finally {
-        console.log("[Auth] Setting loading=false, role set");
+        console.log("[Auth] Login complete, loading=false");
         setRoleLoading(false);
         setLoading(false);
       }
@@ -384,22 +398,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsub();
   }, []);
 
+  // Polling-based ban check (replaces onSnapshot to avoid permission-denied false positives)
   useEffect(() => {
     if (!user?.email || user.email.toLowerCase() === SUPER_ADMIN_EMAIL) return;
     const db = getFirebaseDb();
     if (!db) return;
 
-    // Skip the real-time ban-check listener — Firestore security rules may
-    // deny read access on access_list for regular users, which would cause
-    // onSnapshot to fire the error callback and incorrectly log the user out.
-    // Ban/deletion enforcement is already handled inside ensureAccessAndProfile
-    // during login, which runs with elevated context after authentication.
-    // The periodic re-check below is sufficient for runtime ban enforcement.
-
-    // Instead, poll every 30 seconds with getDoc (which also fails silently on
-    // permission denied but does NOT force-logout the user)
-    const key = emailToKey(user.email);
-    const accessRef = doc(db, "access_list", key);
+    const accessRef = doc(db, "access_list", emailToKey(user.email));
 
     const checkBan = async () => {
       try {
@@ -409,22 +414,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const isBanned = Boolean(data?.banned);
           const isDeleted = Boolean(data?.deleted);
           if (isBanned || isDeleted) {
+            setUser(null);
+            setRole(null);
+            setLoading(false);
+            setRoleLoading(false);
             await forceBlockedExit(isDeleted);
           }
         }
-        // If doc doesn't exist, do NOT force logout — it may just be a
-        // Firestore rules issue or the doc was moved
       } catch {
-        // Permission denied or network error — silently ignore
-        // The user already passed ensureAccessAndProfile during login
+        // Permission denied - silently ignore (normal for some users)
       }
     };
 
-    // Check once after 5 seconds, then every 30 seconds
-    const initialTimer = setTimeout(() => {
-      checkBan();
-    }, 5000);
-
+    // Check after 5 seconds, then every 30 seconds
+    const initialTimer = setTimeout(checkBan, 5000);
     const intervalTimer = setInterval(checkBan, 30000);
 
     return () => {
@@ -491,6 +494,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       signInWithEmail: async (emailRaw: string) => {
         clearLogoutPending();
+        const email = normalizeEmail(emailRaw);
+        
+        // Check if email is banned (but allow any real email to login via OTP)
+        const db = getFirebaseDb();
+        if (db) {
+          try {
+            const key = emailToKey(email);
+            const accessRef = doc(db, "access_list", key);
+            const accessSnap = await getDoc(accessRef);
+            
+            // Only block if explicitly banned
+            if (accessSnap.exists()) {
+              const data = accessSnap.data();
+              if (data?.banned) {
+                if (data?.deleted) { rememberDeletedMessage(); } else { rememberBannedMessage(); }
+                throw new Error("ACCESS_BANNED");
+              }
+            }
+          } catch (banCheckErr) {
+            // If it's ACCESS_BANNED, re-throw it
+            if (banCheckErr instanceof Error && banCheckErr.message === "ACCESS_BANNED") {
+              throw banCheckErr;
+            }
+            // Otherwise (permission denied, etc), allow login to continue
+            console.warn("[Auth] Ban check failed (non-fatal):", banCheckErr);
+          }
+        }
+        
         const nextUser = createEmailOnlyUser(emailRaw);
         localStorage.setItem(EMAIL_SESSION_STORAGE_KEY, nextUser.email);
         setUser(nextUser);
@@ -524,17 +555,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider.setCustomParameters({ prompt: "select_account" });
 
         try {
-          console.log("[Auth] signInWithGoogle: trying popup...");
           // Try popup first (fastest, no page reload)
-          const result = await signInWithPopup(auth, provider);
-          console.log("[Auth] signInWithGoogle: popup succeeded, user:", result.user.email);
-          // onAuthStateChanged will handle the rest
+          console.log("[Auth] signInWithGoogle: calling signInWithPopup...");
+          await signInWithPopup(auth, provider);
+          console.log("[Auth] signInWithGoogle: signInWithPopup succeeded");
         } catch (popupError: unknown) {
           const msg = popupError instanceof Error ? popupError.message : "";
-          console.error("[Auth] signInWithGoogle: popup failed:", msg);
+          console.log("[Auth] signInWithGoogle: popup error:", msg);
           if (msg.includes("popup-blocked") || msg.includes("popup-closed-by-user")) {
             // Popup blocked — fall back to redirect
-            console.log("[Auth] signInWithGoogle: falling back to redirect...");
+            console.log("[Auth] signInWithGoogle: falling back to redirect");
             window.sessionStorage.setItem(GOOGLE_REDIRECT_PENDING_KEY, "1");
             await signInWithRedirect(auth, provider);
           } else {

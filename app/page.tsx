@@ -6,7 +6,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { useLanguage } from "@/components/LanguageProvider";
 import ImageLightbox from "@/components/ImageLightbox";
 import { SUPER_ADMIN_EMAIL } from "@/lib/constants";
-import { sendContactInquiry } from "@/lib/emailService";
+import { sendContactInquiry, sendVerificationCode, generateOTP } from "@/lib/emailService";
 import { createRateLimiter } from "@/lib/rateLimiter";
 
 import styles from "./page.module.css";
@@ -41,7 +41,15 @@ export default function LoginPage() {
       restricted: "الوصول محمي",
       note: "المشاريع متاحة فقط بعد تسجيل الدخول",
       wrong: "اكتب بريدا إلكترونيا صحيحا",
-      banned: "تم حظر هذا الحساب. تواصل مع المسؤول."
+      banned: "تم حظر هذا الحساب. تواصل مع المسؤول.",
+      notRegistered: "هذا البريد غير مسجل. تواصل مع المسؤول.",
+      otpSent: "تم إرسال رمز التحقق إلى بريدك",
+      otpLabel: "رمز التحقق",
+      otpPlaceholder: "أدخل الرمز المكون من 6 أرقام",
+      otpWrong: "رمز التحقق غير صحيح",
+      otpExpired: "انتهت صلاحية الرمز. أعد الإرسال.",
+      resend: "إعادة الإرسال",
+      verify: "تأكيد"
     },
     fr: {
       initials: "JO",
@@ -52,7 +60,15 @@ export default function LoginPage() {
       restricted: "Acces protege",
       note: "Les projets sont accessibles apres authentification",
       wrong: "Entrez une adresse e-mail valide",
-      banned: "Ce compte est bloque. Contactez l'administrateur."
+      banned: "Ce compte est bloque. Contactez l'administrateur.",
+      notRegistered: "Cet e-mail n'est pas enregistre. Contactez l'administrateur.",
+      otpSent: "Code de verification envoye a votre e-mail",
+      otpLabel: "Code de verification",
+      otpPlaceholder: "Entrez le code a 6 chiffres",
+      otpWrong: "Code de verification incorrect",
+      otpExpired: "Code expire. Renvoyez-le.",
+      resend: "Renvoyer",
+      verify: "Verifier"
     },
     en: {
       initials: "JO",
@@ -63,7 +79,15 @@ export default function LoginPage() {
       restricted: "Protected access",
       note: "Projects are available after authentication",
       wrong: "Enter a valid email address",
-      banned: "This account is banned. Contact the administrator."
+      banned: "This account is banned. Contact the administrator.",
+      notRegistered: "This email is not registered. Contact the administrator.",
+      otpSent: "Verification code sent to your email",
+      otpLabel: "Verification Code",
+      otpPlaceholder: "Enter the 6-digit code",
+      otpWrong: "Invalid verification code",
+      otpExpired: "Code expired. Please resend.",
+      resend: "Resend",
+      verify: "Verify"
     }
   } as const;
 
@@ -87,6 +111,13 @@ const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
 const [busy, setBusy] = useState(false);
 const [error, setError] = useState<string | null>(null);
+
+// OTP verification state
+const [showOTP, setShowOTP] = useState(false);
+const [otpInput, setOtpInput] = useState("");
+const [generatedOTP, setGeneratedOTP] = useState("");
+const [otpTimestamp, setOtpTimestamp] = useState(0);
+const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
 // Contact form state
 const [showContactForm, setShowContactForm] = useState(false);
@@ -152,36 +183,112 @@ const onSubmit = async (event: FormEvent) => {
   setBusy(true);
 
   try {
+    // Super admin uses password, skip OTP
     if (isSuperAdminEmail(emailNormalized)) {
       await signIn(emailNormalized, password);
-    } else {
-      await signInWithEmail(emailNormalized);
+      loginRateLimiter.reset();
+      router.replace(nextUrl);
+      return;
     }
-    loginRateLimiter.reset(); // Reset on successful login
+
+    // Regular users: OTP verification required
+    if (!showOTP) {
+      // Step 1: Send OTP code
+      const code = generateOTP();
+      const sent = await sendVerificationCode(emailNormalized, code);
+      
+      if (!sent) {
+        setError(lang === "ar" ? "فشل إرسال الرمز. حاول مرة أخرى." :
+                 lang === "fr" ? "Echec de l'envoi du code. Reessayez." :
+                 "Failed to send code. Please try again.");
+        setBusy(false);
+        return;
+      }
+      
+      setGeneratedOTP(code);
+      setOtpTimestamp(Date.now());
+      setShowOTP(true);
+      setBusy(false);
+      return;
+    }
+
+    // Step 2: Verify OTP code
+    if (Date.now() - otpTimestamp > OTP_EXPIRY_MS) {
+      setError(t.otpExpired);
+      setShowOTP(false);
+      setBusy(false);
+      return;
+    }
+
+    if (otpInput.trim() !== generatedOTP) {
+      setError(t.otpWrong);
+      setBusy(false);
+      return;
+    }
+
+    // OTP verified - proceed with login
+    console.log("[Login] OTP verified, signing in...");
+    await signInWithEmail(emailNormalized);
+    console.log("[Login] signInWithEmail successful");
+    loginRateLimiter.reset();
     router.replace(nextUrl);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    setError(message.includes("ACCESS_BANNED") ? t.banned : t.wrong);
+    console.error("[Login] Error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.log("[Login] Error message:", message);
+    
+    // Check for specific error messages
+    if (message.includes("ACCESS_BANNED")) {
+      setError(t.banned);
+    } else if (message.includes("EMAIL_NOT_REGISTERED") || message.includes("not registered")) {
+      setError(t.notRegistered);
+    } else if (message.includes("timeout") || message.includes("Firestore")) {
+      setError(lang === "ar" ? "خطأ في الاتصال. حاول مرة أخرى." :
+               lang === "fr" ? "Erreur de connexion. Reessayez." :
+               "Connection error. Please try again.");
+    } else {
+      // Show the actual error message for debugging
+      setError(message || t.wrong);
+    }
   } finally {
     setBusy(false);
   }
 };
 
+const handleResendOTP = async () => {
+  setError(null);
+  setBusy(true);
+  
+  const emailNormalized = normalizeEmail(email);
+  const code = generateOTP();
+  const sent = await sendVerificationCode(emailNormalized, code);
+  
+  if (!sent) {
+    setError(lang === "ar" ? "فشل إرسال الرمز. حاول مرة أخرى." :
+             lang === "fr" ? "Echec de l'envoi du code. Reessayez." :
+             "Failed to send code. Please try again.");
+  } else {
+    setGeneratedOTP(code);
+    setOtpTimestamp(Date.now());
+    setOtpInput("");
+  }
+  setBusy(false);
+};
+
   const onGoogleLogin = async () => {
-    // CRITICAL: Call signInWithGoogle FIRST, synchronously, before any React state
-    // changes. This preserves the browser's user-gesture context so the popup
-    // is NOT blocked.
     console.log("[Login] onGoogleLogin: starting...");
     setBusy(true);
     try {
+      console.log("[Login] Calling signInWithGoogle...");
       await signInWithGoogle();
-      console.log("[Login] onGoogleLogin: signInWithGoogle completed successfully");
+      console.log("[Login] signInWithGoogle completed successfully");
       // signInWithPopup succeeded — onAuthStateChanged will set the user
       // and the useEffect below will redirect to /home
     } catch (err) {
-      setBusy(false);
       console.error("[Google Login Error]", err);
+      setBusy(false);
       const message = err instanceof Error ? err.message : String(err);
+      console.log("[Google Login] Error message:", message);
       if (message.includes("ACCESS_BANNED")) {
         setError(t.banned);
       } else if (message.includes("popup-closed-by-user")) {
@@ -330,8 +437,37 @@ const onSubmit = async (event: FormEvent) => {
   </label>
 )}
 
+{showOTP && (
+  <>
+    <p className={styles.notice}>{t.otpSent}</p>
+    <label className={styles.field}>
+      <span>{t.otpLabel}</span>
+      <input
+        type="text"
+        value={otpInput}
+        onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        placeholder={t.otpPlaceholder}
+        autoComplete="one-time-code"
+        inputMode="numeric"
+        maxLength={6}
+        dir="ltr"
+        required
+        autoFocus
+      />
+    </label>
+    <button
+      type="button"
+      className={styles.secondaryBtn}
+      onClick={handleResendOTP}
+      disabled={busy}
+    >
+      {t.resend}
+    </button>
+  </>
+)}
+
             <button className={styles.btn} type="submit" disabled={busy}>
-              {busy ? "..." : t.login}
+              {busy ? "..." : (showOTP ? t.verify : t.login)}
             </button>
 
             <button

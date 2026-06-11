@@ -139,3 +139,40 @@ export async function sendDeviceOfflineAlert(data: OfflineAlertData, toEmail: st
     return false;
   }
 }
+
+// OTP Verification
+export function generateOTP(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+export async function sendVerificationCode(toEmail: string, code: string): Promise<boolean> {
+  if (!isConfigured() || !TEMPLATE_UNIFIED) {
+    console.error("[EmailService] EmailJS not configured");
+    return false;
+  }
+
+  const messageBody = [
+    `Your verification code is:`,
+    ``,
+    `=========================`,
+    `    ${code}`,
+    `=========================`,
+    ``,
+    `This code expires in 10 minutes.`,
+    `If you did not request this code, please ignore this email.`
+  ].join("\n");
+
+  try {
+    await emailjs.send(SERVICE_ID, TEMPLATE_UNIFIED, {
+      to_email: toEmail,
+      subject_line: "Your Verification Code",
+      alert_type: "Email Verification",
+      message_body: messageBody,
+      timestamp: new Date().toLocaleString()
+    }, PUBLIC_KEY);
+    return true;
+  } catch (error) {
+    console.error("[EmailService] sendVerificationCode failed:", error);
+    return false;
+  }
+}
