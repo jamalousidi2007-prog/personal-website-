@@ -1362,19 +1362,31 @@
 }
 
 @media (max-width: 900px) {
+  .page {
+    overflow: visible;
+    overflow-y: auto;
+  }
+
+  .screen {
+    overflow: hidden;
+  }
+
   .navbar {
     flex-direction: column;
   }
 
   .grid {
-    grid-template-columns: none;
     display: flex;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
     gap: 1rem;
     padding-bottom: 0.8rem;
-    scroll-padding-left: 0;
+    margin-left: -1.2rem;
+    margin-right: -1.2rem;
+    padding-left: 1.2rem;
+    padding-right: 1.2rem;
+    scroll-padding-left: 1.2rem;
   }
 
   .grid::-webkit-scrollbar {
@@ -1392,8 +1404,9 @@
   }
 
   .cardLink {
-    flex: 0 0 80%;
+    flex: 0 0 80vw;
     min-width: 260px;
+    max-width: 340px;
     scroll-snap-align: start;
   }
 
