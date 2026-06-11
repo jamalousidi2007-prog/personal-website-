@@ -278,12 +278,11 @@ const handleResendOTP = async () => {
   const onGoogleLogin = async () => {
     console.log("[Login] onGoogleLogin: starting...");
     setBusy(true);
+    setError(null);
     try {
-      console.log("[Login] Calling signInWithGoogle...");
       await signInWithGoogle();
-      console.log("[Login] signInWithGoogle completed successfully");
-      // signInWithPopup succeeded — onAuthStateChanged will set the user
-      // and the useEffect below will redirect to /home
+      console.log("[Login] onGoogleLogin: success, redirecting to", nextUrl);
+      router.replace(nextUrl);
     } catch (err) {
       console.error("[Google Login Error]", err);
       setBusy(false);
@@ -292,11 +291,11 @@ const handleResendOTP = async () => {
       if (message.includes("ACCESS_BANNED")) {
         setError(t.banned);
       } else if (message.includes("popup-closed-by-user")) {
-        // User closed the popup, no error
+        // User closed the popup - no error
       } else if (message.includes("popup-blocked")) {
-        setError(lang === "ar" ? "تم حظر النافذة المنبثقة. اسمح بها في المتصفح." : lang === "fr" ? "Popup bloque. Autorisez-le dans le navigateur." : "Popup blocked. Allow it in your browser.");
+        setError(lang === "ar" ? "تم حظر النافذة المنبثقة. اسمح بها في المتصفح." : "Popup blocked. Allow popups in your browser.");
       } else if (message.includes("auth/unauthorized-domain")) {
-        setError(lang === "ar" ? "هذا المجال غير مصرح به في Firebase." : lang === "fr" ? "Ce domaine n'est pas autorise dans Firebase." : "This domain is not authorized in Firebase.");
+        setError(lang === "ar" ? "المجال غير مصرح به. أضفه في Firebase Console → Authentication → Authorized domains" : "Domain not authorized. Add it to Firebase Console.");
       } else {
         setError(message || t.wrong);
       }
