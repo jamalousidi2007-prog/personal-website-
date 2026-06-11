@@ -117,7 +117,9 @@ useEffect(() => {
   }, []);
 
   useEffect(() => {
+    console.log("[Login] useEffect check: loading=", loading, "user=", user?.email ?? "null", "nextUrl=", nextUrl);
     if (!loading && user) {
+      console.log("[Login] Redirecting to:", nextUrl);
       router.replace(nextUrl);
     }
   }, [loading, nextUrl, router, user]);
@@ -169,11 +171,15 @@ const onSubmit = async (event: FormEvent) => {
     // CRITICAL: Call signInWithGoogle FIRST, synchronously, before any React state
     // changes. This preserves the browser's user-gesture context so the popup
     // is NOT blocked.
+    console.log("[Login] onGoogleLogin: starting...");
+    setBusy(true);
     try {
       await signInWithGoogle();
+      console.log("[Login] onGoogleLogin: signInWithGoogle completed successfully");
       // signInWithPopup succeeded — onAuthStateChanged will set the user
       // and the useEffect below will redirect to /home
     } catch (err) {
+      setBusy(false);
       console.error("[Google Login Error]", err);
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes("ACCESS_BANNED")) {
