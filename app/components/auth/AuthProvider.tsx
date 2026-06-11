@@ -310,11 +310,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // IMPORTANT: Do NOT call getRedirectResult here - it would consume the result!
-    // Let onAuthStateChanged handle it via the GOOGLE_REDIRECT_PENDING_KEY check.
+    // === GOOGLE REDIRECT HANDLING ===
+    // Check if we just came back from a Google redirect
+    const isGoogleRedirect = window.sessionStorage.getItem(GOOGLE_REDIRECT_PENDING_KEY) === "1";
+    
+    if (isGoogleRedirect) {
+      console.log("[Auth] Detected Google redirect, getting result...");
+      window.sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
+      googleSignInInProgress = false;
+      
+      getRedirectResult(auth).then(async (result) => {
+        console.log("[Auth] getRedirectResult:", result?.user?.email ?? "null");
+        
+        if (result?.user) {
+          const gUser = result.user;
+          
+          // Login immediately - no checks, no bans, just login
+          console.log("[Auth] Google user found, logging in directly...");
+          localStorage.removeItem(EMAIL_SESSION_STORAGE_KEY);
+          setUser(gUser);
+          setSessionCookie();
+          setRole(resolveRole(gUser.email ?? ""));
+          setRoleLoading(false);
+          setLoading(false);
+          console.log("[Auth] Google login complete!");
+          
+          // Fire-and-forget: save profile in background
+          ensureAccessAndProfile(gUser.uid, gUser.email ?? "").catch(() => {});
+          notifySuperAdminLogin(gUser.email ?? "").catch(() => {});
+        } else {
+          console.log("[Auth] No user from redirect, restoring session...");
+          void restoreEmailSession();
+        }
+      }).catch((err) => {
+        console.error("[Auth] getRedirectResult error:", err);
+        void restoreEmailSession();
+      });
+      
+      return; // Don't set up onAuthStateChanged yet - redirect is being handled
+    }
 
+    // === NORMAL AUTH STATE CHANGES ===
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log("[Auth] onAuthStateChanged fired, user=", firebaseUser?.email ?? "null", "redirectPending=", window.sessionStorage.getItem(GOOGLE_REDIRECT_PENDING_KEY));
+      console.log("[Auth] onAuthStateChanged:", firebaseUser?.email ?? "null");
       
       if (isLogoutPending()) {
         if (firebaseUser) await signOut(auth);
@@ -328,46 +366,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (!firebaseUser) {
-        // Skip restoreEmailSession if Google sign-in is in progress
         if (googleSignInInProgress) {
-          console.log("[Auth] Skipping restoreEmailSession - Google sign-in in progress");
+          console.log("[Auth] Google sign-in in progress, skipping restore");
           return;
         }
-        
-        // If we just came back from a Google redirect, get the result
-        if (window.sessionStorage.getItem(GOOGLE_REDIRECT_PENDING_KEY) === "1") {
-          console.log("[Auth] Came back from Google redirect, calling getRedirectResult...");
-          try {
-            const result = await getRedirectResult(auth);
-            console.log("[Auth] getRedirectResult result:", result?.user?.email ?? "null");
-            
-            if (result?.user) {
-              // Got user from redirect — process them below
-              firebaseUser = result.user;
-            } else {
-              // No user from redirect — clear and show login
-              console.log("[Auth] No user from redirect, clearing state");
-              window.sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
-              googleSignInInProgress = false;
-              void restoreEmailSession();
-              return;
-            }
-          } catch (redirectErr) {
-            console.error("[Auth] getRedirectResult error:", redirectErr);
-            window.sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
-            googleSignInInProgress = false;
-            void restoreEmailSession();
-            return;
-          }
-        } else {
-          void restoreEmailSession();
-          return;
-        }
+        void restoreEmailSession();
+        return;
       }
 
-      // User is authenticated — set everything
+      // User authenticated (email login, etc.)
       console.log("[Auth] User authenticated:", firebaseUser.email);
-      googleSignInInProgress = false;  // Clear Google sign-in flag
+      googleSignInInProgress = false;
       localStorage.removeItem(EMAIL_SESSION_STORAGE_KEY);
       window.sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
       setUser(firebaseUser);
@@ -375,21 +384,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRoleLoading(true);
 
       try {
-        console.log("[Auth] Calling ensureAccessAndProfile...");
         const meta = await ensureAccessAndProfile(firebaseUser.uid, firebaseUser.email ?? "");
-        console.log("[Auth] ensureAccessAndProfile result:", meta);
         if (meta.banned) {
-          if (meta.deleted) {
-            rememberDeletedMessage();
-          } else {
-            rememberBannedMessage();
-          }
+          if (meta.deleted) { rememberDeletedMessage(); } else { rememberBannedMessage(); }
           await signOut(auth);
           setUser(null);
           setRole(null);
           clearSession();
         } else {
-          console.log("[Auth] Setting role:", meta.role);
           setRole(meta.role);
           await notifySuperAdminLogin(firebaseUser.email ?? "");
         }
@@ -397,7 +399,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("[Auth] ensureAccessAndProfile failed", e);
         setRole(resolveRole(firebaseUser.email ?? ""));
       } finally {
-        console.log("[Auth] Login complete, loading=false");
         setRoleLoading(false);
         setLoading(false);
       }
@@ -562,74 +563,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: "select_account" });
 
-        // Prevent onAuthStateChanged from interfering
         googleSignInInProgress = true;
-
-        let firebaseUser: User | null = null;
-
-        // Try popup first
-        try {
-          console.log("[Auth] signInWithGoogle: trying popup...");
-          const credential = await signInWithPopup(auth, provider);
-          firebaseUser = credential.user;
-          console.log("[Auth] signInWithGoogle: popup succeeded, user=", firebaseUser.email);
-        } catch (popupErr: unknown) {
-          const msg = popupErr instanceof Error ? popupErr.message : "";
-          console.log("[Auth] signInWithGoogle: popup failed:", msg);
-          
-          // If popup blocked or cancelled, fall back to redirect
-          if (msg.includes("popup-blocked") || msg.includes("popup-closed")) {
-            console.log("[Auth] signInWithGoogle: falling back to redirect...");
-            window.sessionStorage.setItem(GOOGLE_REDIRECT_PENDING_KEY, "1");
-            await signInWithRedirect(auth, provider);
-            return; // Page will redirect
-          }
-          // Other errors: throw
-          googleSignInInProgress = false;
-          throw popupErr;
-        }
-
-        if (!firebaseUser) {
-          googleSignInInProgress = false;
-          throw new Error("No user returned from Google");
-        }
-
-        // Set user and session IMMEDIATELY
-        googleSignInInProgress = false;
-        localStorage.removeItem(EMAIL_SESSION_STORAGE_KEY);
-        window.sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
-        setUser(firebaseUser);
-        setSessionCookie();
-        setRoleLoading(true);
-
-        // Ensure access profile (non-fatal)
-        try {
-          console.log("[Auth] Google: calling ensureAccessAndProfile...");
-          const meta = await ensureAccessAndProfile(firebaseUser.uid, firebaseUser.email ?? "");
-          console.log("[Auth] Google: ensureAccessAndProfile result:", meta);
-          
-          if (meta.banned) {
-            if (meta.deleted) { rememberDeletedMessage(); } else { rememberBannedMessage(); }
-            await signOut(auth);
-            setUser(null);
-            setRole(null);
-            clearSession();
-            setRoleLoading(false);
-            setLoading(false);
-            throw new Error("ACCESS_BANNED");
-          }
-          
-          setRole(meta.role);
-          await notifySuperAdminLogin(firebaseUser.email ?? "");
-        } catch (e) {
-          if (e instanceof Error && e.message === "ACCESS_BANNED") throw e;
-          console.warn("[Auth] Google ensureAccessAndProfile failed (non-fatal):", e);
-          setRole(resolveRole(firebaseUser.email ?? ""));
-        }
-
-        setRoleLoading(false);
-        setLoading(false);
-        console.log("[Auth] Google login complete!");
+        window.sessionStorage.setItem(GOOGLE_REDIRECT_PENDING_KEY, "1");
+        console.log("[Auth] Starting Google redirect...");
+        await signInWithRedirect(auth, provider);
       },
       signOutUser: async () => {
         try {

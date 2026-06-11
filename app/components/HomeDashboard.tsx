@@ -1504,10 +1504,10 @@ export default function HomeDashboard() {
         src={profileImage}
         alt="profile"
         onClose={() => setPreviewOpen(false)}
-        onImageClick={() => {
+        onImageClick={canEditText ? () => {
           setPreviewOpen(false);
           profileInputRef.current?.click();
-        }}
+        } : undefined}
       />
     </section>
   );

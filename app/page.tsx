@@ -276,29 +276,16 @@ const handleResendOTP = async () => {
 };
 
   const onGoogleLogin = async () => {
-    console.log("[Login] onGoogleLogin: starting...");
     setBusy(true);
     setError(null);
     try {
       await signInWithGoogle();
-      console.log("[Login] onGoogleLogin: success, redirecting to", nextUrl);
-      router.replace(nextUrl);
+      // Page will redirect to Google - nothing else to do here
     } catch (err) {
-      console.error("[Google Login Error]", err);
       setBusy(false);
+      console.error("[Google Login Error]", err);
       const message = err instanceof Error ? err.message : String(err);
-      console.log("[Google Login] Error message:", message);
-      if (message.includes("ACCESS_BANNED")) {
-        setError(t.banned);
-      } else if (message.includes("popup-closed-by-user")) {
-        // User closed the popup - no error
-      } else if (message.includes("popup-blocked")) {
-        setError(lang === "ar" ? "تم حظر النافذة المنبثقة. اسمح بها في المتصفح." : "Popup blocked. Allow popups in your browser.");
-      } else if (message.includes("auth/unauthorized-domain")) {
-        setError(lang === "ar" ? "المجال غير مصرح به. أضفه في Firebase Console → Authentication → Authorized domains" : "Domain not authorized. Add it to Firebase Console.");
-      } else {
-        setError(message || t.wrong);
-      }
+      setError(message || t.wrong);
     }
   };
 

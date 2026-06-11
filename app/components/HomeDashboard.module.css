@@ -1367,7 +1367,34 @@
   }
 
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: none;
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 1rem;
+    padding-bottom: 0.8rem;
+    scroll-padding-left: 0;
+  }
+
+  .grid::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  .grid::-webkit-scrollbar-thumb {
+    background: #ffffff20;
+    border-radius: 3px;
+  }
+
+  .navActions {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .cardLink {
+    flex: 0 0 80%;
+    min-width: 260px;
+    scroll-snap-align: start;
   }
 
   .userRow {
