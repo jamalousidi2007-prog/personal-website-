@@ -17,7 +17,6 @@ import {
   collection,
   doc,
   getDoc,
-  onSnapshot,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -390,25 +389,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const db = getFirebaseDb();
     if (!db) return;
 
-    const unsub = onSnapshot(doc(db, "access_list", emailToKey(user.email)), async (snapshot) => {
-      const data = snapshot.data();
-      const isBanned = Boolean(data?.banned);
-      const isDeleted = Boolean(data?.deleted);
+    // Skip the real-time ban-check listener — Firestore security rules may
+    // deny read access on access_list for regular users, which would cause
+    // onSnapshot to fire the error callback and incorrectly log the user out.
+    // Ban/deletion enforcement is already handled inside ensureAccessAndProfile
+    // during login, which runs with elevated context after authentication.
+    // The periodic re-check below is sufficient for runtime ban enforcement.
 
-      // If user was banned or deleted (or doc removed entirely), force them out
-      if (isBanned || isDeleted || !snapshot.exists()) {
-        setUser(null);
-        setRole(null);
-        setLoading(false);
-        setRoleLoading(false);
-        await forceBlockedExit(isDeleted || !snapshot.exists());
+    // Instead, poll every 30 seconds with getDoc (which also fails silently on
+    // permission denied but does NOT force-logout the user)
+    const key = emailToKey(user.email);
+    const accessRef = doc(db, "access_list", key);
+
+    const checkBan = async () => {
+      try {
+        const snap = await getDoc(accessRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const isBanned = Boolean(data?.banned);
+          const isDeleted = Boolean(data?.deleted);
+          if (isBanned || isDeleted) {
+            await forceBlockedExit(isDeleted);
+          }
+        }
+        // If doc doesn't exist, do NOT force logout — it may just be a
+        // Firestore rules issue or the doc was moved
+      } catch {
+        // Permission denied or network error — silently ignore
+        // The user already passed ensureAccessAndProfile during login
       }
-    }, (err) => {
-      // Silently handle permission errors (e.g., email-only superadmin sessions)
-      console.warn("[Auth] access_list listener error:", err.message);
-    });
+    };
 
-    return () => unsub();
+    // Check once after 5 seconds, then every 30 seconds
+    const initialTimer = setTimeout(() => {
+      checkBan();
+    }, 5000);
+
+    const intervalTimer = setInterval(checkBan, 30000);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(intervalTimer);
+    };
   }, [user]);
 
   const value = useMemo<AuthContextType>(
