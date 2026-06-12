@@ -64,7 +64,7 @@ async function pickPort() {
 const port = await pickPort();
 console.log(`[dev] Starting Next.js on ${HOST}:${port}`);
 
-const child = spawn(nodeExe, [nextBin, "start", "-H", HOST, "-p", String(port)], {
+const child = spawn(nodeExe, [nextBin, "dev", "-H", HOST, "-p", String(port)], {
   cwd,
   stdio: "inherit",
   windowsHide: true

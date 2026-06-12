@@ -1,10 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { useLanguage } from "@/components/LanguageProvider";
-import ImageLightbox from "@/components/ImageLightbox";
 import { SUPER_ADMIN_EMAIL } from "@/lib/constants";
 import { sendContactInquiry, sendVerificationCode, generateOTP } from "@/lib/emailService";
 import { createRateLimiter } from "@/lib/rateLimiter";
@@ -102,8 +101,6 @@ export default function LoginPage() {
   const router = useRouter();
   const [nextUrl, setNextUrl] = useState("/home");
   const [profileImage, setProfileImage] = useState(DEFAULT_PROFILE_IMAGE);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const profileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { user, loading, signIn, signInWithEmail, signInWithGoogle } = useAuth();
 
@@ -289,20 +286,6 @@ const handleResendOTP = async () => {
     }
   };
 
-  const onProfileImageChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      if (!result) return;
-      setProfileImage(result);
-      localStorage.setItem(PROFILE_IMAGE_STORAGE_KEY, result);
-      event.target.value = "";
-    };
-    reader.readAsDataURL(file);
-  };
-
   const onContactSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setContactError(null);
@@ -375,22 +358,11 @@ const handleResendOTP = async () => {
       <div className="container">
         <section className={styles.page}>
           <form className={styles.card} onSubmit={onSubmit}>
-            <label
-              className={styles.loginAvatarBtn}
-              onClick={() => setPreviewOpen(true)}
-            >
+            <div className={styles.loginAvatarBtn}>
               <div className={styles.loginAvatar}>
                 <img src={profileImage} alt="profile" />
               </div>
-              <input
-                ref={profileInputRef}
-                type="file"
-                accept="image/*"
-                className={styles.hiddenFileInput}
-                onClick={(e) => e.stopPropagation()}
-                onChange={onProfileImageChange}
-              />
-            </label>
+            </div>
             <h2>{t.title}</h2>
             <p className={styles.sub}>{t.subtitle}</p>
 
@@ -601,16 +573,6 @@ const handleResendOTP = async () => {
           )}
         </section>
       </div>
-      <ImageLightbox
-        open={previewOpen}
-        src={profileImage}
-        alt="profile"
-        onClose={() => setPreviewOpen(false)}
-        onImageClick={() => {
-          setPreviewOpen(false);
-          profileInputRef.current?.click();
-        }}
-      />
     </main>
   );
 }

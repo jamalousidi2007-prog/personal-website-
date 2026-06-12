@@ -1009,7 +1009,12 @@ export default function HomeDashboard() {
           <button
             type="button"
             className={styles.profilePreviewBtn}
-            onClick={() => setPreviewOpen(true)}
+            onClick={() => {
+              if (canEditText) {
+                setPreviewOpen(true);
+              }
+            }}
+            style={canEditText ? undefined : { cursor: "default" }}
           >
             <div className={styles.profileBox}>
               {!photoError ? (

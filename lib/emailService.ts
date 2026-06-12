@@ -147,7 +147,7 @@ export function generateOTP(): string {
 
 export async function sendVerificationCode(toEmail: string, code: string): Promise<boolean> {
   if (!isConfigured() || !TEMPLATE_UNIFIED) {
-    console.error("[EmailService] EmailJS not configured");
+    console.error("[EmailService] EmailJS not configured", { SERVICE_ID, PUBLIC_KEY: PUBLIC_KEY ? "***set***" : "missing", TEMPLATE_UNIFIED });
     return false;
   }
 
@@ -162,17 +162,40 @@ export async function sendVerificationCode(toEmail: string, code: string): Promi
     `If you did not request this code, please ignore this email.`
   ].join("\n");
 
+  const params = {
+    to_email: toEmail,
+    subject_line: "Your Verification Code",
+    alert_type: "Email Verification",
+    message_body: messageBody,
+    timestamp: new Date().toLocaleString()
+  };
+
+  console.log("[EmailService] Sending OTP to:", toEmail);
+
   try {
-    await emailjs.send(SERVICE_ID, TEMPLATE_UNIFIED, {
-      to_email: toEmail,
-      subject_line: "Your Verification Code",
-      alert_type: "Email Verification",
-      message_body: messageBody,
-      timestamp: new Date().toLocaleString()
-    }, PUBLIC_KEY);
-    return true;
+    // Use REST API directly for better error visibility
+    const response = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service_id: SERVICE_ID,
+        template_id: TEMPLATE_UNIFIED,
+        user_id: PUBLIC_KEY,
+        template_params: params
+      })
+    });
+
+    const responseText = await response.text();
+    console.log("[EmailService] OTP response:", { status: response.status, body: responseText });
+
+    if (response.ok) {
+      return true;
+    }
+
+    console.error("[EmailService] OTP send failed:", { status: response.status, body: responseText });
+    return false;
   } catch (error) {
-    console.error("[EmailService] sendVerificationCode failed:", error);
+    console.error("[EmailService] sendVerificationCode network error:", String(error));
     return false;
   }
 }
