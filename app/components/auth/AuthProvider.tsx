@@ -150,43 +150,49 @@ async function ensureAccessAndProfile(uid: string, emailRaw: string): Promise<Ac
 
   const role = resolveRole(email, accessRole);
 
-  // Write user and access docs (non-fatal if fails)
+  // Write access_list entry (most critical for user visibility)
   try {
     await Promise.race([
-      Promise.all([
-        setDoc(
-          usersRef,
-          {
-            uid,
-            email,
-            role,
-            banned: accessBanned,
-            status: "online",
-            lastSeenText: "Online",
-            updatedAt: serverTimestamp(),
-            createdAt: userSnap?.exists() ? userSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
-          },
-          { merge: true }
-        ),
-        setDoc(
-          accessRef,
-          {
-            email,
-            role,
-            banned: accessBanned,
-            status: "online",
-            lastSeenText: "Online",
-            updatedAt: serverTimestamp(),
-            createdAt: accessSnap?.exists() ? accessSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
-          },
-          { merge: true }
-        ),
-      ]),
+      setDoc(
+        accessRef,
+        {
+          email,
+          role,
+          banned: accessBanned,
+          status: "online",
+          lastSeenText: "Online",
+          updatedAt: serverTimestamp(),
+          createdAt: accessSnap?.exists() ? accessSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
+        },
+        { merge: true }
+      ),
       timeout(10000),
     ]);
-  } catch (writeErr) {
-    console.warn("[Auth] Failed to write user/access docs (non-fatal):", writeErr);
-    // Non-fatal: continue even if writes fail
+  } catch (accessErr) {
+    console.error("[Auth] Failed to write access_list entry:", accessErr);
+  }
+
+  // Write user profile (independent of access_list)
+  try {
+    await Promise.race([
+      setDoc(
+        usersRef,
+        {
+          uid,
+          email,
+          role,
+          banned: accessBanned,
+          status: "online",
+          lastSeenText: "Online",
+          updatedAt: serverTimestamp(),
+          createdAt: userSnap?.exists() ? userSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
+        },
+        { merge: true }
+      ),
+      timeout(10000),
+    ]);
+  } catch (userErr) {
+    console.warn("[Auth] Failed to write user profile (non-fatal):", userErr);
   }
 
   return { role, banned: accessBanned || accessDeleted, deleted: accessDeleted };
@@ -325,18 +331,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (result?.user) {
           const gUser = result.user;
           
-          // Login immediately - no checks, no bans, just login
-          console.log("[Auth] Google user found, logging in directly...");
+          console.log("[Auth] Google user found, saving profile...");
           localStorage.removeItem(EMAIL_SESSION_STORAGE_KEY);
           setUser(gUser);
           setSessionCookie();
-          setRole(resolveRole(gUser.email ?? ""));
-          setRoleLoading(false);
-          setLoading(false);
+          setRoleLoading(true);
+          
+          // Wait for access_list write so user appears in users list
+          try {
+            const meta = await ensureAccessAndProfile(gUser.uid, gUser.email ?? "");
+            setRole(resolveRole(gUser.email ?? "", meta.role));
+          } catch {
+            setRole(resolveRole(gUser.email ?? ""));
+          } finally {
+            setRoleLoading(false);
+            setLoading(false);
+          }
           console.log("[Auth] Google login complete!");
           
-          // Fire-and-forget: save profile in background
-          ensureAccessAndProfile(gUser.uid, gUser.email ?? "").catch(() => {});
+          // Fire-and-forget: notify superadmin
           notifySuperAdminLogin(gUser.email ?? "").catch(() => {});
         } else {
           console.log("[Auth] No user from redirect, restoring session...");
